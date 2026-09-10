@@ -2,6 +2,7 @@ name: Build and test
 
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -16,11 +17,13 @@ jobs:
       - uses: actions/checkout@v5
       - name: Test
         run: swift test --disable-sandbox
-      - name: Build application
-        run: ./scripts/build.sh
-      - name: Upload application
+      - name: Build universal installer
+        run: ./scripts/package-release.sh
+      - name: Upload installer
         uses: actions/upload-artifact@v7
         with:
-          name: Limits-macOS
-          path: dist/Limits.app
+          name: Limits-macOS-installer
+          path: |
+            release/*.dmg
+            release/*.sha256
           if-no-files-found: error

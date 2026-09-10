@@ -1,5 +1,7 @@
 .build/
+.build-*/
 dist/
+release/
 .DS_Store
 .swiftpm/
 .tools/

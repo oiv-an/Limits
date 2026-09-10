@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var item: NSStatusItem!
     private var popover: NSPopover!
     private var floatingPanel: NSPanel?
+    private var welcomeWindow: NSWindow?
     private var store: UsageStore!
     private var subscriptions = Set<AnyCancellable>()
     private var displayTimer: Timer?
@@ -84,6 +85,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store.connection.unlock()
         } else if CommandLine.arguments.contains("--show-panel") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.togglePopover() }
+        } else if CommandLine.arguments.contains("--welcome") || !UserDefaults.standard.bool(forKey: "completedOnboarding") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.showWelcome() }
         }
     }
 
@@ -114,6 +117,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             NSApp.activate(ignoringOtherApps: true)
         }
+    }
+
+    private var installedInApplications: Bool {
+        let path = Bundle.main.bundleURL.standardizedFileURL.path
+        return path.hasPrefix("/Applications/")
+            || path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications").path + "/")
+    }
+
+    private func showWelcome() {
+        if welcomeWindow == nil {
+            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 450),
+                styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Limits"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: WelcomeView(store: store,
+                installedInApplications: installedInApplications) { [weak self] launchAtLogin, floating in
+                    guard let self else { return }
+                    self.store.floating = floating
+                    if launchAtLogin != self.store.launchAtLogin { self.store.setLaunchAtLogin(launchAtLogin) }
+                    UserDefaults.standard.set(true, forKey: "completedOnboarding")
+                    self.welcomeWindow?.orderOut(nil)
+                    self.togglePopover()
+                })
+            window.center()
+            welcomeWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        welcomeWindow?.makeKeyAndOrderFront(nil)
     }
 
     private func updateFloating() {
@@ -164,6 +195,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                     try self.render(ClaudeLoginView(connection: self.store.connection, login: self.store.connection.browserLogin),
                                     size: NSSize(width: 490, height: 445), appearance: .darkAqua, to: directory.appendingPathComponent("claude-login.png"))
+                    try self.render(WelcomeView(store: self.store, installedInApplications: true, finish: { _, _ in }),
+                                    size: NSSize(width: 520, height: 450), appearance: .darkAqua, to: directory.appendingPathComponent("welcome.png"))
                     let report: [String: Any] = ["codex": self.store.title(for: self.store.codex, groupID: self.store.codexGroup),
                         "codexConnected": self.store.codex.snapshot != nil, "claude": self.store.title(for: self.store.claude),
                         "claudeConnected": self.store.claude.snapshot != nil, "claudeNeedsLogin": self.store.claude.needsLogin,
