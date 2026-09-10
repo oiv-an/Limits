@@ -9,7 +9,8 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-14
+    # Swift tools 6.0 requires Xcode 16, available on the macOS 15 runner.
+    runs-on: macos-15
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -20,6 +21,6 @@ jobs:
       - name: Upload application
         uses: actions/upload-artifact@v4
         with:
-          name: Limits-macOS-arm64
+          name: Limits-macOS
           path: dist/Limits.app
           if-no-files-found: error
