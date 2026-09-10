@@ -13,13 +13,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Test
         run: swift test --disable-sandbox
       - name: Build application
         run: ./scripts/build.sh
       - name: Upload application
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: Limits-macOS
           path: dist/Limits.app
