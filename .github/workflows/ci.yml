@@ -19,7 +19,7 @@ jobs:
       - name: Build application
         run: ./scripts/build.sh
       - name: Upload application
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: Limits-macOS
           path: dist/Limits.app
