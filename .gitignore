@@ -1,0 +1,10 @@
+.build/
+dist/
+.DS_Store
+.swiftpm/
+.tools/
+backups/
+verification/
+verification-*/
+*.xcuserstate
+DerivedData/

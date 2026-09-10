@@ -1,0 +1,25 @@
+name: Build and test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: swift test --disable-sandbox
+      - name: Build application
+        run: ./scripts/build.sh
+      - name: Upload application
+        uses: actions/upload-artifact@v4
+        with:
+          name: Limits-macOS-arm64
+          path: dist/Limits.app
+          if-no-files-found: error
