@@ -8,7 +8,6 @@ struct ProviderState {
     var message: String?
     var loading = false
     var needsLogin = false
-    var requiresUnlock = false
     var retryAt: Date?
     func stale(interval: TimeInterval) -> Bool { message != nil || (snapshot?.isStale(interval: interval) ?? false) }
 }
@@ -101,11 +100,9 @@ final class UsageStore: ObservableObject {
         state.message = (error as? UsageError)?.localizedDescription ?? "Не удалось обновить данные. Проверьте интернет."
         if case UsageError.signIn = error {
             state.needsLogin = true
-            state.requiresUnlock = false
             // A signed-out account must not inherit another account's cached percentage.
             state.snapshot = nil
         }
-        if case UsageError.locked = error { state.requiresUnlock = true; state.needsLogin = false }
         if case UsageError.retryLater(let seconds) = error { state.retryAt = Date().addingTimeInterval(seconds) }
         return state
     }

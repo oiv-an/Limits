@@ -35,10 +35,7 @@ struct DashboardView: View {
                         interval: store.interval, selectedGroup: store.codexGroup,
                         connect: { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Codex.app")) })
                     ProviderCard(name: "Claude", mark: "asterisk", accent: .claudeAccent, state: store.claude,
-                        interval: store.interval, connect: {
-                            if store.claude.needsLogin { store.connection.showLogin() }
-                            else { store.connection.unlock() }
-                        })
+                        interval: store.interval, connect: { store.connection.showLogin() })
                     if settings { SettingsContent(store: store) }
                 }.padding(.horizontal, 16).padding(.bottom, 16)
             }.frame(maxHeight: settings ? 540 : 450)
@@ -143,17 +140,13 @@ private struct ProviderCard: View {
                         Label(state.message ?? "Данные устарели. Обновляем автоматически.", systemImage: "clock.badge.exclamationmark")
                             .font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                     }
-                    if state.requiresUnlock {
-                        Button("Разблокировать Touch ID", systemImage: "touchid", action: connect)
-                            .font(.system(size: 11, weight: .medium)).buttonStyle(.bordered).tint(accent)
-                    }
                 } else {
                     Text(state.loading ? "Получаем лимиты…" : (state.message ?? "Подключите аккаунт для чтения лимитов."))
                         .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     if !state.loading || state.needsLogin {
                         Button(action: connect) {
                             HStack(spacing: 6) {
-                                Text(state.requiresUnlock ? "Разблокировать Touch ID" : (name == "Claude" ? "Подключить Claude" : "Открыть Codex"))
+                                Text(name == "Claude" ? "Подключить Claude" : "Открыть Codex")
                                 Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
                             }.font(.system(size: 11, weight: .medium)).padding(.vertical, 3)
                         }.buttonStyle(.bordered).tint(accent)
@@ -222,31 +215,13 @@ private struct SettingsContent: View {
                     ForEach(groups) { Text($0.title).tag($0.id) }
                 }.controlSize(.small)
             }
-            ClaudeAccountPicker(connection: store.connection, store: store)
-            Button("Разблокировать Claude через Touch ID", systemImage: "touchid") { store.connection.unlock() }
-                .buttonStyle(.link).disabled(store.connection.connecting)
             Button("Войти в Claude…") { store.connection.showLogin() }.buttonStyle(.link)
-            Text("Touch ID нужен один раз после запуска или блокировки Mac. Фоновые обновления не запрашивают пароль.")
+            Text("Вход сохраняется автоматически, в том числе после сна и перезапуска Mac.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let message = store.settingsMessage { Text(message).foregroundStyle(.orange).font(.caption) }
             Text("Claude: остаток на 5 часов / неделю. Под процентами — время до сброса в том же порядке. Codex показывает наименьший остаток выбранного лимита. Точка после процентов — сохранённые данные.")
                 .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }.font(.system(size: 11)).padding(4)
-    }
-}
-
-private struct ClaudeAccountPicker: View {
-    @ObservedObject var connection: ClaudeConnection
-    @ObservedObject var store: UsageStore
-    var body: some View {
-        if connection.organizations.count > 1 {
-            Picker("Аккаунт Claude", selection: Binding(get: { connection.selectedOrganization }, set: {
-                connection.selectedOrganization = $0; store.claude.snapshot = nil; store.refreshClaude(force: true)
-            })) {
-                Text("Выберите аккаунт").tag("")
-                ForEach(connection.organizations) { Text($0.name).tag($0.id) }
-            }.controlSize(.small)
-        }
     }
 }
 

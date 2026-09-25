@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 import Combine
 import LimitsCore
-import Security
 
 @main
 enum LimitsMain {
@@ -17,8 +16,6 @@ enum LimitsMain {
             return
         }
         let app = NSApplication.shared
-        // This process must never raise legacy keychain password/application-trust prompts.
-        SecKeychainSetUserInteractionAllowed(false)
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -68,24 +65,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         updateTitle(); updateFloating(); store.start()
-        for notification in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
-            NSWorkspace.shared.notificationCenter.addObserver(forName: notification, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.store.connection.lock() }
-            }
-        }
-        DistributedNotificationCenter.default().addObserver(forName: NSNotification.Name("com.apple.screenIsLocked"),
-            object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.store.connection.lock() }
-            }
         if let index = CommandLine.arguments.firstIndex(of: "--smoke-test"), CommandLine.arguments.count > index + 1 {
             smokeTest(at: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
         } else if CommandLine.arguments.contains("--connect-claude") {
             store.connection.showLogin()
-        } else if CommandLine.arguments.contains("--unlock-claude") {
-            store.connection.unlock()
         } else if CommandLine.arguments.contains("--show-panel") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.togglePopover() }
-        } else if CommandLine.arguments.contains("--welcome") || !UserDefaults.standard.bool(forKey: "completedOnboarding") {
+        } else if CommandLine.arguments.contains("--welcome") || (!UserDefaults.standard.bool(forKey: "completedOnboarding")
+                    && store.codex.snapshot == nil && store.claude.snapshot == nil) {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.showWelcome() }
         }
     }
@@ -194,7 +181,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         }
                     }
                     try self.render(ClaudeLoginView(connection: self.store.connection, login: self.store.connection.browserLogin),
-                                    size: NSSize(width: 490, height: 445), appearance: .darkAqua, to: directory.appendingPathComponent("claude-login.png"))
+                                    size: NSSize(width: 470, height: 380), appearance: .darkAqua, to: directory.appendingPathComponent("claude-login.png"))
                     try self.render(WelcomeView(store: self.store, installedInApplications: true, finish: { _, _ in }),
                                     size: NSSize(width: 520, height: 450), appearance: .darkAqua, to: directory.appendingPathComponent("welcome.png"))
                     let report: [String: Any] = ["codex": self.store.title(for: self.store.codex, groupID: self.store.codexGroup),

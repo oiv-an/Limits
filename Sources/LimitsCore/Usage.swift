@@ -59,12 +59,11 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
 public enum UsageError: Error, LocalizedError, Equatable {
     case unavailable(String)
     case signIn(String)
-    case locked(String)
     case retryLater(seconds: TimeInterval)
     case invalidResponse
     public var errorDescription: String? {
         switch self {
-        case .unavailable(let message), .signIn(let message), .locked(let message): return message
+        case .unavailable(let message), .signIn(let message): return message
         case .retryLater: return "Сервис просит подождать. Повторим автоматически."
         case .invalidResponse: return "Сервис вернул неизвестный формат лимитов."
         }

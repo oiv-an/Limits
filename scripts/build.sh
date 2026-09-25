@@ -2,25 +2,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 project_root="$PWD"
+if [[ -z "${DEVELOPER_DIR:-}" && -d /Applications/Xcode.app/Contents/Developer ]]; then
+  export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
+fi
 
 build_architecture() {
   arch="$1"
   scratch="$project_root/.build-$arch"
   export CLANG_MODULE_CACHE_PATH="$scratch/module-cache"
   export SWIFTPM_MODULECACHE_OVERRIDE="$scratch/module-cache"
-  swift build -c release --disable-sandbox --scratch-path "$scratch" \
+  xcrun swift build -c release --disable-sandbox --scratch-path "$scratch" \
     --triple "$arch-apple-macosx14.0" --product Limits
+  compiled_binary="$(xcrun swift build -c release --disable-sandbox --scratch-path "$scratch" \
+    --triple "$arch-apple-macosx14.0" --show-bin-path)/Limits"
 }
 
 build_architecture arm64
+arm_binary="$compiled_binary"
 build_architecture x86_64
+intel_binary="$compiled_binary"
 
 app="$PWD/dist/Limits.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-lipo -create \
-  "$project_root/.build-arm64/arm64-apple-macosx/release/Limits" \
-  "$project_root/.build-x86_64/x86_64-apple-macosx/release/Limits" \
+lipo -create "$arm_binary" "$intel_binary" \
   -output "$app/Contents/MacOS/Limits"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -29,8 +34,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Limits</string>
   <key>CFBundleDisplayName</key><string>Limits</string>
   <key>CFBundleIdentifier</key><string>pro.ivol.Limits</string>
-  <key>CFBundleVersion</key><string>6</string>
-  <key>CFBundleShortVersionString</key><string>1.1.0</string>
+  <key>CFBundleVersion</key><string>7</string>
+  <key>CFBundleShortVersionString</key><string>1.2.0</string>
   <key>CFBundleExecutable</key><string>Limits</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -40,7 +45,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict></plist>
 PLIST
-swift scripts/icon.swift "$app/Contents/Resources"
+xcrun swift scripts/icon.swift "$app/Contents/Resources"
 signing_identity="${LIMITS_CODESIGN_IDENTITY:--}"
 if [[ "$signing_identity" == "-" ]]; then
   codesign --force --options runtime --sign - "$app"
