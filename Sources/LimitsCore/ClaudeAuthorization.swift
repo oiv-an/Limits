@@ -11,7 +11,7 @@ public struct ClaudeAuthorization: Sendable {
         redirectURI = "http://localhost:\(port)/callback"
     }
     public var url: URL {
-        var url = URLComponents(string: "https://claude.ai/oauth/authorize")!
+        var url = URLComponents(string: "https://claude.com/cai/oauth/authorize")!
         url.queryItems = [URLQueryItem(name: "code", value: "true"),
             URLQueryItem(name: "client_id", value: ClaudeHTTPClient.clientID),
             URLQueryItem(name: "response_type", value: "code"),
