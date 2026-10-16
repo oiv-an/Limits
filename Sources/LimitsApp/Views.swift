@@ -1,5 +1,5 @@
-import SwiftUI
 import LimitsCore
+import SwiftUI
 
 extension Color {
     static let codexAccent = Color(red: 0.32, green: 0.79, blue: 0.65)
@@ -12,6 +12,8 @@ extension Color {
 struct DashboardView: View {
     @ObservedObject var store: UsageStore
     @State private var settings = false
+    @State private var confirmCodexLogout = false
+    @State private var confirmCodexLogin = false
     var body: some View {
         VStack(spacing: 0) {
             HStack(alignment: .center) {
@@ -20,21 +22,46 @@ struct DashboardView: View {
                     Text("Осталось в подписках").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { store.floating.toggle() } label: {
-                    Image(systemName: store.floating ? "pin.fill" : "pin").frame(width: 24, height: 24)
-                }.buttonStyle(.plain).foregroundStyle(store.floating ? Color.accentColor : .secondary)
-                    .help("Закрепить маленькую панель поверх окон").accessibilityLabel("Панель поверх окон")
-                Button { store.refresh() } label: {
+                Menu {
+                    if store.codexAuthenticating {
+                        Button("Отменить вход") { store.cancelCodexAuthentication() }
+                    } else {
+                        Button("Войти заново…") { confirmCodexLogin = true }
+                        Button("Выйти из Codex…", role: .destructive) { confirmCodexLogout = true }
+                        Divider()
+                        Button("Обновить лимиты Codex") { store.refreshCodex() }
+                            .disabled(store.codex.loading)
+                    }
+                } label: {
+                    Image(systemName: "person.crop.circle").frame(width: 24, height: 24)
+                }.menuStyle(.borderlessButton).fixedSize()
+                    .help("Аккаунт Codex").accessibilityLabel("Аккаунт Codex")
+                Button {
+                    store.floating.toggle()
+                } label: {
+                    Image(systemName: store.floating ? "pin.fill" : "pin").frame(
+                        width: 24, height: 24)
+                }.buttonStyle(.plain).foregroundStyle(
+                    store.floating ? Color.accentColor : .secondary
+                )
+                .help("Закрепить маленькую панель поверх окон").accessibilityLabel(
+                    "Панель поверх окон")
+                Button {
+                    store.refresh()
+                } label: {
                     Image(systemName: "arrow.clockwise").frame(width: 24, height: 24)
                 }.buttonStyle(.plain).disabled(store.codex.loading || store.claude.loading)
                     .help("Обновить лимиты").accessibilityLabel("Обновить лимиты")
             }.padding(.horizontal, 20).padding(.top, 18).padding(.bottom, 17)
             ScrollView {
                 VStack(spacing: 12) {
-                    ProviderCard(name: "Codex", mark: "terminal", accent: .codexAccent, state: store.codex,
+                    ProviderCard(
+                        name: "Codex", mark: "terminal", accent: .codexAccent, state: store.codex,
                         interval: store.interval, selectedGroup: store.codexGroup,
-                        connect: { NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications/Codex.app")) })
-                    ProviderCard(name: "Claude", mark: "asterisk", accent: .claudeAccent, state: store.claude,
+                        connect: { confirmCodexLogin = true })
+                    ProviderCard(
+                        name: "Claude", mark: "asterisk", accent: .claudeAccent,
+                        state: store.claude,
                         interval: store.interval, connect: { store.connection.showLogin() })
                     if settings { SettingsContent(store: store) }
                 }.padding(.horizontal, 16).padding(.bottom, 16)
@@ -44,29 +71,57 @@ struct DashboardView: View {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     HStack(spacing: 5) {
                         Circle().fill(statusColor).frame(width: 5, height: 5)
-                        Text(updateText(now: context.date)).font(.system(size: 10)).foregroundStyle(.secondary)
+                        Text(updateText(now: context.date)).font(.system(size: 10)).foregroundStyle(
+                            .secondary)
                     }
                 }
                 Spacer()
-                Button { withAnimation(.easeInOut(duration: 0.15)) { settings.toggle() } } label: {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) { settings.toggle() }
+                } label: {
                     Image(systemName: "slider.horizontal.3").frame(width: 22, height: 22)
                 }.buttonStyle(.plain).help("Настройки").accessibilityLabel("Настройки")
-                Button { NSApp.terminate(nil) } label: {
+                Button {
+                    NSApp.terminate(nil)
+                } label: {
                     Image(systemName: "power").frame(width: 22, height: 22)
-                }.buttonStyle(.plain).help("Завершить Limits").accessibilityLabel("Завершить Limits")
+                }.buttonStyle(.plain).help("Завершить Limits").accessibilityLabel(
+                    "Завершить Limits")
             }.padding(.horizontal, 18).padding(.vertical, 9)
         }
         .frame(width: 356)
         .background(.regularMaterial)
+        .alert("Выйти из Codex?", isPresented: $confirmCodexLogout) {
+            Button("Выйти", role: .destructive) { store.authenticateCodex(login: false) }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text(
+                "Будет удалена сохранённая авторизация Codex, используемая Limits и CLI. Открытое приложение Codex может потребовать перезапуска. Из ChatGPT в браузере выход выполнен не будет."
+            )
+        }
+        .alert("Войти в другой аккаунт Codex?", isPresented: $confirmCodexLogin) {
+            Button("Войти заново") { store.authenticateCodex(login: true) }
+            Button("Отмена", role: .cancel) {}
+        } message: {
+            Text(
+                "Сначала выйдем из текущего аккаунта Codex, затем откроется вход в браузере. Выберите второй аккаунт. Если браузер автоматически выбирает прежний, выйдите из ChatGPT в браузере и повторите вход."
+            )
+        }
     }
     private var statusColor: Color {
         if store.codex.loading || store.claude.loading { return .secondary }
-        return store.codex.message != nil || (store.claude.snapshot != nil && store.claude.message != nil) ? .orange : .codexAccent
+        return store.codex.message != nil
+            || (store.claude.snapshot != nil && store.claude.message != nil)
+            ? .orange : .codexAccent
     }
     private func updateText(now: Date) -> String {
         if store.codex.loading || store.claude.loading { return "Обновляем…" }
-        let dates = [store.codex.snapshot?.fetchedAt, store.claude.snapshot?.fetchedAt].compactMap { $0 }
-        guard let date = dates.min() else { return "Автообновление · \(Int(store.interval / 60)) мин" }
+        let dates = [store.codex.snapshot?.fetchedAt, store.claude.snapshot?.fetchedAt].compactMap {
+            $0
+        }
+        guard let date = dates.min() else {
+            return "Автообновление · \(Int(store.interval / 60)) мин"
+        }
         let minutes = Int(max(0, now.timeIntervalSince(date)) / 60)
         return minutes < 1 ? "Обновлено только что" : "Обновлено \(minutes) мин назад"
     }
@@ -93,7 +148,8 @@ private struct ProviderCard: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(name).font(.system(size: 14, weight: .semibold))
                         if let plan = state.snapshot?.plan {
-                            Text(plan.capitalized).font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text(plan.capitalized).font(.system(size: 10)).foregroundStyle(
+                                .secondary)
                         } else if state.snapshot != nil {
                             Text("Подключён").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
@@ -101,10 +157,14 @@ private struct ProviderCard: View {
                     Spacer()
                     if let headline {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(headline.percentageText).font(.system(size: 26, weight: .medium, design: .rounded)).monospacedDigit()
+                            Text(headline.percentageText).font(
+                                .system(size: 26, weight: .medium, design: .rounded)
+                            ).monospacedDigit()
                                 .foregroundStyle(Color.quota(headline.remaining, accent: accent))
-                            Text(headline.title.lowercased()).font(.system(size: 10)).foregroundStyle(.secondary)
-                        }.accessibilityElement(children: .combine).accessibilityLabel("Осталось \(headline.percentageText), \(headline.title)")
+                            Text(headline.title.lowercased()).font(.system(size: 10))
+                                .foregroundStyle(.secondary)
+                        }.accessibilityElement(children: .combine).accessibilityLabel(
+                            "Осталось \(headline.percentageText), \(headline.title)")
                     } else if state.loading {
                         ProgressView().controlSize(.small).frame(width: 38)
                     } else {
@@ -112,42 +172,65 @@ private struct ProviderCard: View {
                     }
                 }
                 if let snapshot = state.snapshot {
-                    let chosen = snapshot.groups.first(where: { $0.id == selectedGroup }) ?? snapshot.groups.first
+                    let chosen =
+                        snapshot.groups.first(where: { $0.id == selectedGroup })
+                        ?? snapshot.groups.first
                     if let chosen {
-                        if chosen.title != name { Text(chosen.title).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary) }
+                        if chosen.title != name {
+                            Text(chosen.title).font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        }
                         ForEach(chosen.windows) { window in
                             QuotaRow(window: window, accent: accent, now: context.date)
                         }
                     }
                     let others = snapshot.groups.filter { $0.id != chosen?.id }
                     if !others.isEmpty {
-                        Button { withAnimation { expanded.toggle() } } label: {
+                        Button {
+                            withAnimation { expanded.toggle() }
+                        } label: {
                             HStack(spacing: 4) {
-                                Text(expanded ? "Скрыть остальные лимиты" : "Ещё лимиты · \(others.count)")
-                                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 8, weight: .bold))
+                                Text(
+                                    expanded
+                                        ? "Скрыть остальные лимиты" : "Ещё лимиты · \(others.count)"
+                                )
+                                Image(systemName: expanded ? "chevron.up" : "chevron.down").font(
+                                    .system(size: 8, weight: .bold))
                             }.font(.system(size: 10)).foregroundStyle(.secondary)
                         }.buttonStyle(.plain)
                         if expanded {
                             ForEach(others) { group in
                                 VStack(alignment: .leading, spacing: 9) {
                                     Text(group.title).font(.system(size: 11, weight: .medium))
-                                    ForEach(group.windows) { QuotaRow(window: $0, accent: accent, now: context.date) }
+                                    ForEach(group.windows) {
+                                        QuotaRow(window: $0, accent: accent, now: context.date)
+                                    }
                                 }.padding(.top, 3)
                             }
                         }
                     }
                     if state.stale(interval: interval) {
-                        Label(state.message ?? "Данные устарели. Обновляем автоматически.", systemImage: "clock.badge.exclamationmark")
-                            .font(.system(size: 10)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                        Label(
+                            state.message ?? "Данные устарели. Обновляем автоматически.",
+                            systemImage: "clock.badge.exclamationmark"
+                        )
+                        .font(.system(size: 10)).foregroundStyle(.orange).fixedSize(
+                            horizontal: false, vertical: true)
                     }
                 } else {
-                    Text(state.loading ? "Получаем лимиты…" : (state.message ?? "Подключите аккаунт для чтения лимитов."))
-                        .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(
+                        state.message
+                            ?? (state.loading
+                                ? "Получаем лимиты…" : "Подключите аккаунт для чтения лимитов.")
+                    )
+                    .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(
+                        horizontal: false, vertical: true)
                     if !state.loading || state.needsLogin {
                         Button(action: connect) {
                             HStack(spacing: 6) {
-                                Text(name == "Claude" ? "Подключить Claude" : "Открыть Codex")
-                                Image(systemName: "arrow.up.right").font(.system(size: 9, weight: .semibold))
+                                Text(name == "Claude" ? "Подключить Claude" : "Войти в Codex")
+                                Image(systemName: "arrow.up.right").font(
+                                    .system(size: 9, weight: .semibold))
                             }.font(.system(size: 11, weight: .medium)).padding(.vertical, 3)
                         }.buttonStyle(.bordered).tint(accent)
                     }
@@ -155,7 +238,9 @@ private struct ProviderCard: View {
             }.padding(15)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 15))
-                .overlay(RoundedRectangle(cornerRadius: 15).strokeBorder(Color.primary.opacity(0.06), lineWidth: 1))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 15).strokeBorder(
+                        Color.primary.opacity(0.06), lineWidth: 1))
         }
     }
 }
@@ -170,7 +255,8 @@ private struct QuotaRow: View {
             HStack {
                 Text(window.title).foregroundStyle(.secondary)
                 Spacer()
-                Text(expired ? "Обновляется…" : "\(window.percentageText) осталось").monospacedDigit()
+                Text(expired ? "Обновляется…" : "\(window.percentageText) осталось")
+                    .monospacedDigit()
             }.font(.system(size: 11))
             GeometryReader { geometry in
                 Capsule().fill(Color.primary.opacity(0.07))
@@ -182,9 +268,13 @@ private struct QuotaRow: View {
                     }
             }.frame(height: 4)
             if let reset = window.resetsAt {
-                Text(expired ? "Период закончился · ждём свежие данные" : "Сброс через \(countdown(reset.timeIntervalSince(now)))")
-                    .font(.system(size: 10)).foregroundStyle(.tertiary)
-                    .help("Сброс: \(reset.formatted(date: .abbreviated, time: .shortened))")
+                Text(
+                    expired
+                        ? "Период закончился · ждём свежие данные"
+                        : "Сброс через \(countdown(reset.timeIntervalSince(now)))"
+                )
+                .font(.system(size: 10)).foregroundStyle(.tertiary)
+                .help("Сброс: \(reset.formatted(date: .abbreviated, time: .shortened))")
             }
         }
     }
@@ -201,10 +291,15 @@ private struct SettingsContent: View {
     @ObservedObject var store: UsageStore
     var body: some View {
         VStack(alignment: .leading, spacing: 13) {
-            Text("НАСТРОЙКИ").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(.secondary)
-            Toggle("Панель поверх окон", isOn: $store.floating).toggleStyle(.switch).controlSize(.mini)
-            Toggle("Запускать при входе в Mac", isOn: Binding(get: { store.launchAtLogin }, set: store.setLaunchAtLogin))
-                .toggleStyle(.switch).controlSize(.mini)
+            Text("НАСТРОЙКИ").font(.system(size: 9, weight: .semibold)).tracking(1).foregroundStyle(
+                .secondary)
+            Toggle("Панель поверх окон", isOn: $store.floating).toggleStyle(.switch).controlSize(
+                .mini)
+            Toggle(
+                "Запускать при входе в Mac",
+                isOn: Binding(get: { store.launchAtLogin }, set: store.setLaunchAtLogin)
+            )
+            .toggleStyle(.switch).controlSize(.mini)
             Picker("Обновлять", selection: $store.interval) {
                 Text("Раз в 2 минуты").tag(120.0)
                 Text("Раз в 5 минут").tag(300.0)
@@ -217,10 +312,16 @@ private struct SettingsContent: View {
             }
             Button("Войти в Claude…") { store.connection.showLogin() }.buttonStyle(.link)
             Text("Вход сохраняется автоматически, в том числе после сна и перезапуска Mac.")
-                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            if let message = store.settingsMessage { Text(message).foregroundStyle(.orange).font(.caption) }
-            Text("Claude: остаток на 5 часов / неделю. Под процентами — время до сброса в том же порядке. Codex показывает наименьший остаток выбранного лимита. Точка после процентов — сохранённые данные.")
-                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(
+                    horizontal: false, vertical: true)
+            if let message = store.settingsMessage {
+                Text(message).foregroundStyle(.orange).font(.caption)
+            }
+            Text(
+                "Claude: остаток на 5 часов / неделю. Под процентами — время до сброса в том же порядке. Codex показывает наименьший остаток выбранного лимита. Точка после процентов — сохранённые данные."
+            )
+            .font(.system(size: 10)).foregroundStyle(.secondary).fixedSize(
+                horizontal: false, vertical: true)
         }.font(.system(size: 11)).padding(4)
     }
 }
@@ -237,25 +338,38 @@ struct FloatingView: View {
                 .frame(width: 20).help("Перетащите панель за свободное место")
             Button(action: openDashboard) {
                 HStack(spacing: 12) {
-                    column(CompactUsage(state: store.codex, groupID: store.codexGroup, interval: store.interval, now: now),
-                           color: .codexAccent, width: 88)
+                    column(
+                        CompactUsage(
+                            state: store.codex, groupID: store.codexGroup, interval: store.interval,
+                            now: now),
+                        color: .codexAccent, width: 88)
                     Rectangle().fill(Color.primary.opacity(0.1)).frame(width: 1, height: 27)
-                    column(CompactUsage(state: store.claude, claude: true, interval: store.interval, now: now),
-                           color: .claudeAccent, width: 124)
+                    column(
+                        CompactUsage(
+                            state: store.claude, claude: true, interval: store.interval, now: now),
+                        color: .claudeAccent, width: 124)
                 }
             }.buttonStyle(.plain)
-            Button { store.floating = false } label: {
-                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary).frame(width: 24, height: 44)
+            Button {
+                store.floating = false
+            } label: {
+                Image(systemName: "xmark").font(.system(size: 8, weight: .bold)).foregroundStyle(
+                    .tertiary
+                ).frame(width: 24, height: 44)
             }.buttonStyle(.plain).help("Скрыть плавающую панель")
         }.frame(width: 292, height: 65)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-            .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.primary.opacity(0.09), lineWidth: 1))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16).strokeBorder(
+                    Color.primary.opacity(0.09), lineWidth: 1))
     }
     private func column(_ summary: CompactUsage, color: Color, width: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: summary.symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(color)
-                Text(summary.value).font(.system(size: 20, weight: .medium, design: .rounded)).monospacedDigit()
+                Image(systemName: summary.symbol).font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(color)
+                Text(summary.value).font(.system(size: 20, weight: .medium, design: .rounded))
+                    .monospacedDigit()
             }
             HStack(spacing: 4) {
                 Image(systemName: "clock").font(.system(size: 8))
