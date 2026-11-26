@@ -34,8 +34,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>Limits</string>
   <key>CFBundleDisplayName</key><string>Limits</string>
   <key>CFBundleIdentifier</key><string>pro.ivol.Limits</string>
-  <key>CFBundleVersion</key><string>7</string>
-  <key>CFBundleShortVersionString</key><string>1.2.0</string>
+  <key>CFBundleVersion</key><string>8</string>
+  <key>CFBundleShortVersionString</key><string>1.3.0</string>
   <key>CFBundleExecutable</key><string>Limits</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
@@ -46,6 +46,13 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 xcrun swift scripts/icon.swift "$app/Contents/Resources"
+# Signing: LIMITS_CODESIGN_IDENTITY="-" forces an ad-hoc build (public releases, no certificate).
+# If unset, a "Developer ID Application" certificate from the keychain is used when available:
+# a stable signature keeps the vault key readable after updates without keychain prompts.
+if [[ -z "${LIMITS_CODESIGN_IDENTITY:-}" ]]; then
+  LIMITS_CODESIGN_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -n 1)"
+fi
 signing_identity="${LIMITS_CODESIGN_IDENTITY:--}"
 if [[ "$signing_identity" == "-" ]]; then
   codesign --force --options runtime --sign - "$app"

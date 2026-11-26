@@ -1,8 +1,11 @@
 import Foundation
 
 private final class NoCredentialRedirects: NSObject, URLSessionTaskDelegate {
-    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
-                    newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) {
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
         completionHandler(nil)
     }
 }
@@ -22,16 +25,39 @@ public struct ClaudeHTTPClient: ClaudeTransport {
         return try UsageParser.claude(await send(request), source: "Claude")
     }
 
+    /// Account email for the default account name. Best effort: nil on any problem.
+    public func profileEmail(accessToken: String) async -> String? {
+        var request = URLRequest(url: URL(string: "https://api.anthropic.com/api/oauth/profile")!)
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        guard let data = try? await send(request),
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let account = root["account"] as? [String: Any]
+        else { return nil }
+        return account["email"] as? String ?? account["email_address"] as? String
+    }
+
     public func refresh(_ session: ClaudeSession) async throws -> ClaudeSession {
-        guard let token = session.refreshToken, !token.isEmpty else { throw UsageError.signIn("Войдите в Claude через браузер.") }
-        var body = ["grant_type": "refresh_token", "refresh_token": token, "client_id": Self.clientID]
+        guard let token = session.refreshToken, !token.isEmpty else {
+            throw UsageError.signIn("Войдите в Claude через браузер.")
+        }
+        var body = [
+            "grant_type": "refresh_token", "refresh_token": token, "client_id": Self.clientID,
+        ]
         if !session.scopes.isEmpty { body["scope"] = session.scopes.joined(separator: " ") }
         return try ClaudeSession.tokenResponse(await tokenRequest(body), replacing: session)
     }
 
-    public func exchange(code: String, verifier: String, state: String, redirectURI: String) async throws -> ClaudeSession {
-        try ClaudeSession.tokenResponse(await tokenRequest(["grant_type": "authorization_code", "code": code,
-            "client_id": Self.clientID, "redirect_uri": redirectURI, "code_verifier": verifier, "state": state]))
+    public func exchange(code: String, verifier: String, state: String, redirectURI: String)
+        async throws -> ClaudeSession
+    {
+        try ClaudeSession.tokenResponse(
+            await tokenRequest([
+                "grant_type": "authorization_code", "code": code,
+                "client_id": Self.clientID, "redirect_uri": redirectURI, "code_verifier": verifier,
+                "state": state,
+            ]))
     }
 
     private func tokenRequest(_ body: [String: String]) async throws -> Data {
@@ -44,24 +70,38 @@ public struct ClaudeHTTPClient: ClaudeTransport {
 
     private func send(_ original: URLRequest) async throws -> Data {
         let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 20; config.timeoutIntervalForResource = 30
-        config.httpCookieStorage = nil; config.urlCache = nil
-        let session = URLSession(configuration: config, delegate: NoCredentialRedirects(), delegateQueue: nil)
+        config.timeoutIntervalForRequest = 20
+        config.timeoutIntervalForResource = 30
+        config.httpCookieStorage = nil
+        config.urlCache = nil
+        let session = URLSession(
+            configuration: config, delegate: NoCredentialRedirects(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         var request = original
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Limits/1.2.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("Limits/1.3.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw UsageError.invalidResponse }
         switch http.statusCode {
         case 200: return data
-        case 401, 403: throw UsageError.signIn("Claude отклонил сохранённый вход. Подключите аккаунт через браузер.")
+        case 401, 403:
+            throw UsageError.signIn(
+                "Claude отклонил сохранённый вход. Подключите аккаунт через браузер.")
         case 400:
-            let error = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            if error == "invalid_grant" { throw UsageError.signIn("Вход в Claude отозван или истёк. Подключите аккаунт через браузер.") }
-            throw UsageError.unavailable("Claude не смог обновить подключение. Повторим автоматически.")
+            let error =
+                (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"]
+                as? String
+            if error == "invalid_grant" {
+                throw UsageError.signIn(
+                    "Вход в Claude отозван или истёк. Подключите аккаунт через браузер.")
+            }
+            throw UsageError.unavailable(
+                "Claude не смог обновить подключение. Повторим автоматически.")
         case 429:
-            throw UsageError.retryLater(seconds: max(300, min(Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 900, 86400)))
+            throw UsageError.retryLater(
+                seconds: max(
+                    300,
+                    min(Double(http.value(forHTTPHeaderField: "Retry-After") ?? "") ?? 900, 86400)))
         default: throw UsageError.unavailable("Claude временно недоступен (\(http.statusCode)).")
         }
     }

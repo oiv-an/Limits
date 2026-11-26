@@ -7,19 +7,6 @@ import SwiftUI
 enum LimitsMain {
     @MainActor
     static func main() {
-        if CommandLine.arguments.contains("--check-codex") {
-            do {
-                let snapshot = try CodexClient.fetch()
-                let encoder = JSONEncoder()
-                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-                encoder.dateEncodingStrategy = .iso8601
-                print(String(data: try encoder.encode(snapshot), encoding: .utf8)!)
-            } catch {
-                fputs("\(error.localizedDescription)\n", stderr)
-                exit(1)
-            }
-            return
-        }
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
         let delegate = AppDelegate()
@@ -55,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.behavior = .transient
         popover.animates = true
         popover.contentViewController = NSHostingController(rootView: DashboardView(store: store))
-        popover.contentSize = NSSize(width: 356, height: 490)
+        popover.contentSize = NSSize(width: 356, height: 560)
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = item.button {
             button.target = self
@@ -63,7 +50,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.setAccessibilityLabel("Limits — лимиты Codex и Claude")
         }
         store.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { self?.updateTitle() }
+            DispatchQueue.main.async {
+                self?.updateTitle()
+                self?.resizeFloating()
+            }
         }.store(in: &subscriptions)
         store.onFloatingChanged = { [weak self] in self?.updateFloating() }
         displayTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
@@ -74,8 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             CommandLine.arguments.count > index + 1
         {
             // Render cached readings without changing credentials, preferences or the live cache.
-            store.codex.message = nil
-            store.claude.message = nil
+            for index in store.accounts.indices { store.accounts[index].state.message = nil }
             updateTitle()
             smokeTest(at: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
             return
@@ -88,14 +77,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         {
             smokeTest(at: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
         } else if CommandLine.arguments.contains("--connect-claude") {
-            store.connection.showLogin()
+            store.addClaude()
         } else if CommandLine.arguments.contains("--show-panel") {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
                 self?.togglePopover()
             }
         } else if CommandLine.arguments.contains("--welcome")
             || (!UserDefaults.standard.bool(forKey: "completedOnboarding")
-                && store.codex.snapshot == nil && store.claude.snapshot == nil)
+                && store.accounts.isEmpty)
         {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                 self?.showWelcome()
@@ -115,19 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         button.image = MenuBarImage.make(summaries)
         button.imagePosition = .imageOnly
         button.toolTip =
-            summaries.map(\.help).joined(separator: "\n\n")
-            + "\n\nClaude: 5 часов / неделя. Часы под процентами — время до сброса.\nТочка после процентов означает сохранённые данные."
+            summaries.isEmpty
+            ? "Limits — добавьте аккаунты Claude и Codex"
+            : summaries.map(\.help).joined(separator: "\n\n")
+                + "\n\nClaude: 5 часов / неделя. Часы под процентами — время до сброса.\nЦифра под значком — номер аккаунта. Точка после процентов означает сохранённые данные."
         button.setAccessibilityValue(summaries.map(\.help).joined(separator: ". "))
     }
 
-    private func compactSummaries() -> [CompactUsage] {
-        let now = Date()
-        return [
-            CompactUsage(
-                state: store.codex, groupID: store.codexGroup, interval: store.interval, now: now),
-            CompactUsage(state: store.claude, claude: true, interval: store.interval, now: now),
-        ]
-    }
+    private func compactSummaries() -> [CompactUsage] { store.summaries() }
 
     @objc private func togglePopover() {
         if popover.isShown {
@@ -175,14 +159,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         welcomeWindow?.makeKeyAndOrderFront(nil)
     }
 
+    private func resizeFloating() {
+        guard let panel = floatingPanel else { return }
+        let width = store.floatingWidth
+        guard abs(panel.frame.width - width) > 0.5 else { return }
+        var frame = panel.frame
+        // Keep the right edge in place so the panel grows to the left.
+        frame.origin.x += frame.width - width
+        frame.size.width = width
+        panel.setFrame(frame, display: true)
+    }
+
     private func updateFloating() {
         guard store.floating else {
             floatingPanel?.orderOut(nil)
             return
         }
         if floatingPanel == nil {
+            let width = store.floatingWidth
             let panel = NSPanel(
-                contentRect: NSRect(x: 0, y: 0, width: 292, height: 65),
+                contentRect: NSRect(x: 0, y: 0, width: width, height: 65),
                 styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             panel.isOpaque = false
             panel.backgroundColor = .clear
@@ -198,9 +194,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !panel.setFrameUsingName("LimitsFloatingPanel"),
                 let frame = NSScreen.main?.visibleFrame
             {
-                panel.setFrameOrigin(NSPoint(x: frame.maxX - 312, y: frame.maxY - 85))
+                panel.setFrameOrigin(NSPoint(x: frame.maxX - width - 20, y: frame.maxY - 85))
             }
-            panel.setContentSize(NSSize(width: 292, height: 65))
+            panel.setContentSize(NSSize(width: width, height: 65))
             panel.setFrameAutosaveName("LimitsFloatingPanel")
             floatingPanel = panel
         }
@@ -209,7 +205,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let screen = NSScreen.main
         {
             panel.setFrameOrigin(
-                NSPoint(x: screen.visibleFrame.maxX - 312, y: screen.visibleFrame.maxY - 85))
+                NSPoint(
+                    x: screen.visibleFrame.maxX - panel.frame.width - 20,
+                    y: screen.visibleFrame.maxY - 85))
         }
         floatingPanel?.orderFrontRegardless()
     }
@@ -223,22 +221,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     timer.invalidate()
                     return
                 }
-                guard (!self.store.codex.loading && !self.store.claude.loading) || Date() > deadline
-                else { return }
+                guard !self.store.anyLoading || Date() > deadline else { return }
                 timer.invalidate()
                 do {
                     try FileManager.default.createDirectory(
                         at: directory, withIntermediateDirectories: true)
                     try self.render(
-                        DashboardView(store: self.store), size: NSSize(width: 356, height: 490),
+                        DashboardView(store: self.store), size: NSSize(width: 356, height: 560),
                         appearance: .darkAqua,
                         to: directory.appendingPathComponent("panel-dark.png"))
                     try self.render(
-                        DashboardView(store: self.store), size: NSSize(width: 356, height: 490),
+                        DashboardView(store: self.store), size: NSSize(width: 356, height: 560),
                         appearance: .aqua, to: directory.appendingPathComponent("panel-light.png"))
                     try self.render(
                         FloatingView(store: self.store, openDashboard: {}),
-                        size: NSSize(width: 292, height: 65),
+                        size: NSSize(width: self.store.floatingWidth, height: 65),
                         appearance: .darkAqua, to: directory.appendingPathComponent("floating.png"))
                     if let image = self.item.button?.image {
                         let size = NSSize(width: image.size.width + 16, height: 24)
@@ -267,17 +264,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         size: NSSize(width: 520, height: 450), appearance: .darkAqua,
                         to: directory.appendingPathComponent("welcome.png"))
                     let report: [String: Any] = [
-                        "codex": self.store.title(
-                            for: self.store.codex, groupID: self.store.codexGroup),
-                        "codexConnected": self.store.codex.snapshot != nil,
-                        "claude": self.store.title(for: self.store.claude),
-                        "claudeConnected": self.store.claude.snapshot != nil,
-                        "claudeNeedsLogin": self.store.claude.needsLogin,
+                        "accounts": self.store.accounts.map { account -> [String: Any] in
+                            [
+                                "provider": account.provider.rawValue,
+                                "name": account.name,
+                                "value": self.store.title(for: account),
+                                "connected": account.state.snapshot != nil,
+                                "needsLogin": account.state.needsLogin,
+                                "error": account.state.message ?? "",
+                            ]
+                        },
+                        "vault": self.store.vaultMessage ?? "ok",
                         "menuTitle": self.compactSummaries().map {
                             "\($0.name) \($0.value) · \($0.reset)"
                         }.joined(separator: " | "),
-                        "codexError": self.store.codex.message ?? "",
-                        "claudeError": self.store.claude.message ?? "",
                     ]
                     try JSONSerialization.data(
                         withJSONObject: report, options: [.prettyPrinted, .sortedKeys]

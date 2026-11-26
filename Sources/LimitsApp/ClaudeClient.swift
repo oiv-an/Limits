@@ -1,53 +1,60 @@
 import AppKit
-import SwiftUI
 import LimitsCore
+import SwiftUI
 
 @MainActor
 final class ClaudeConnection: ObservableObject {
-    @Published var loginMessage = "Вход нужен только для подключения аккаунта. Подтверждать каждое обновление не потребуется."
+    @Published var loginMessage =
+        "Вход нужен только для подключения аккаунта. Подтверждать каждое обновление не потребуется."
     @Published var connecting = false
+    /// Account being re-connected; nil means a new account will be added.
+    @Published var targetName: String?
     let browserLogin = ClaudeBrowserLogin()
-    var onConnected: ((UsageSnapshot) -> Void)?
-    var onError: ((Error) -> Void)?
+    var onSession: ((ClaudeSession, UUID?) async throws -> Void)?
+    private var target: UUID?
     private var loginWindow: NSWindow?
-    private let service = ClaudeSessionService(file: ClaudeSavedConnection.file,
-                                               importExisting: { try ClaudeSavedConnection.importExisting() })
 
     init() {
         browserLogin.onSuccess = { [weak self] session in self?.finishLogin(session: session) }
     }
-    func fetch() async throws -> UsageSnapshot {
-        let snapshot = try await service.fetch()
-        ClaudeSavedConnection.removeObsoleteFiles()
-        return snapshot
-    }
-    func showLogin() {
+    func showLogin(target: UUID?, name: String?) {
+        if browserLogin.running, self.target != target { browserLogin.cancel() }
+        self.target = target
+        targetName = name
+        loginMessage =
+            name.map { "Повторный вход для «\($0)»." }
+            ?? "Новый аккаунт Claude. Если браузер сразу входит в прежний аккаунт, выйдите из claude.ai в браузере."
         if loginWindow == nil {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 470, height: 380),
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 470, height: 380),
                 styleMask: [.titled, .closable], backing: .buffered, defer: false)
             window.title = "Подключение Claude — Limits"
             window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: ClaudeLoginView(connection: self, login: browserLogin))
-            window.center(); loginWindow = window
+            window.contentView = NSHostingView(
+                rootView: ClaudeLoginView(connection: self, login: browserLogin))
+            window.center()
+            loginWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true); loginWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        loginWindow?.makeKeyAndOrderFront(nil)
         browserLogin.start()
     }
     private func finishLogin(session: ClaudeSession) {
         guard !connecting else { return }
         connecting = true
         loginMessage = "Сохраняем вход и получаем лимиты…"
+        let target = self.target
         Task {
             defer { connecting = false }
             do {
-                try await service.accept(session)
-                let snapshot = try await fetch()
+                try await onSession?(session, target)
                 loginMessage = "Claude подключён."
                 browserLogin.message = "Подключение сохранено. Лимиты обновляются автоматически."
-                onConnected?(snapshot); loginWindow?.orderOut(nil)
+                loginWindow?.orderOut(nil)
             } catch {
-                loginMessage = (error as? UsageError)?.localizedDescription ?? "Вход сохранён, но лимиты пока не удалось получить. Повторим автоматически."
-                onError?(error)
+                loginMessage =
+                    (error as? UsageError)?.localizedDescription
+                    ?? "Вход сохранён, но лимиты пока не удалось получить. Повторим автоматически."
             }
         }
     }
@@ -61,10 +68,13 @@ struct ClaudeLoginView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(spacing: 12) {
-                Image(systemName: "globe").font(.system(size: 28)).foregroundStyle(Color.claudeAccent)
+                Image(systemName: "globe").font(.system(size: 28)).foregroundStyle(
+                    Color.claudeAccent)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("Подключить Claude").font(.system(size: 21, weight: .semibold))
-                    Text("Google, Apple или email — в вашем браузере").font(.system(size: 12)).foregroundStyle(.secondary)
+                    Text(connection.targetName.map { "Войти: \($0)" } ?? "Добавить аккаунт Claude")
+                        .font(.system(size: 21, weight: .semibold)).lineLimit(1)
+                    Text("Google, Apple или email — в вашем браузере").font(.system(size: 12))
+                        .foregroundStyle(.secondary)
                 }
             }
             Text(login.message).font(.callout).fixedSize(horizontal: false, vertical: true)
@@ -82,8 +92,10 @@ struct ClaudeLoginView: View {
             Divider()
             DisclosureGroup("Браузер показал код?", isExpanded: $showCode) {
                 HStack {
-                    SecureField("Код со страницы Claude", text: $login.code).textFieldStyle(.roundedBorder)
-                        .onSubmit { login.submitCode() }
+                    SecureField("Код со страницы Claude", text: $login.code).textFieldStyle(
+                        .roundedBorder
+                    )
+                    .onSubmit { login.submitCode() }
                     Button("Продолжить") { login.submitCode() }
                         .disabled(!login.running || login.exchanging || login.code.isEmpty)
                 }.padding(.top, 8)
