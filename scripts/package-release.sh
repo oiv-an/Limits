@@ -22,15 +22,20 @@ printf '%s\n' \
   '2. Откройте Limits из папки «Программы».' \
   '3. При первом запуске выберите автозагрузку и плавающую панель.' \
   '4. Добавьте аккаунты: кнопка «+» в окне Limits.' \
-  '' \
-  'Если macOS пишет, что приложение не проверено:' \
-  'Системные настройки → Конфиденциальность и безопасность →' \
-  '«Всё равно открыть». Или в Терминале:' \
-  '  xattr -dr com.apple.quarantine /Applications/Limits.app' \
-  '' \
-  'После обновления macOS один раз спросит доступ к ключу' \
-  '«pro.ivol.Limits.vault» — введите пароль Mac и нажмите «Всегда разрешать».' \
   > "$stage/INSTALL.txt"
+if [[ "$(codesign -dv dist/Limits.app 2>&1)" == *"Signature=adhoc"* ]]; then
+  # Unsigned builds need the Gatekeeper and keychain hints.
+  printf '%s\n' \
+    '' \
+    'Если macOS пишет, что приложение не проверено:' \
+    'Системные настройки → Конфиденциальность и безопасность →' \
+    '«Всё равно открыть». Или в Терминале:' \
+    '  xattr -dr com.apple.quarantine /Applications/Limits.app' \
+    '' \
+    'После обновления macOS один раз спросит доступ к ключу' \
+    '«pro.ivol.Limits.vault» — введите пароль Mac и нажмите «Всегда разрешать».' \
+    >> "$stage/INSTALL.txt"
+fi
 
 hdiutil create -volname "Limits $version" -srcfolder "$stage" -format UDZO \
   -imagekey zlib-level=9 -ov "$dmg"
